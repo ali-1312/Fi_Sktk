@@ -44,21 +44,30 @@ app.get('/', (req, res) => {
   res.send('Fi Sktk Backend is running!');
 });
 
-// Profile Route
+// Profile Route (Self)
 app.get('/profile', auth, async (req, res) => {
+  // ... existing logic ...
+});
+
+// Public Profile Route (Inspect others)
+app.get('/profile/:id', auth, async (req, res) => {
   try {
-    const userRes = await db.query(queries.getUserById, [req.user.id]);
+    const userRes = await db.query(queries.getUserById, [req.params.id]);
     if (userRes.rows.length === 0) {
       return res.status(404).json({ error: 'User not found.' });
     }
-    const ratingRes = await db.query(queries.getUserRating, [req.user.id]);
+    const ratingRes = await db.query(queries.getUserRating, [req.params.id]);
+    
+    // Hide email for privacy when inspecting others
+    const userData = userRes.rows[0];
     res.json({ 
-      ...userRes.rows[0], 
+      username: userData.username,
+      created_at: userData.created_at,
       rating: ratingRes.rows[0].average_rating || 0,
       total_ratings: ratingRes.rows[0].total_ratings || 0
     });
   } catch (error) {
-    console.error('Fetch profile error:', error);
+    console.error('Fetch public profile error:', error);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
