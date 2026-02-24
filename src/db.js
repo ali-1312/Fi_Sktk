@@ -1,7 +1,6 @@
 require('dotenv').config({ override: true });
 const { Pool } = require('pg');
 
-// Auto-clean host string (remove https:// or http:// if present)
 const cleanHost = process.env.DB_HOST ? process.env.DB_HOST.replace(/^https?:\/\//, '') : '';
 
 const pool = new Pool({
@@ -9,10 +8,12 @@ const pool = new Pool({
   host: cleanHost,
   database: process.env.DB_DATABASE,
   password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  port: process.env.DB_PORT || 6543,
   ssl: {
     rejectUnauthorized: false
-  }
+  },
+  connectionTimeoutMillis: 10000, // 10 seconds timeout
+  max: 10, // Max clients in pool
 });
 
 module.exports = {
