@@ -4,7 +4,6 @@ const getUserByUsername = 'SELECT * FROM users WHERE LOWER(username) = LOWER($1)
 const getUserById = 'SELECT id, email, username, created_at FROM users WHERE id = $1';
 const updateUsername = 'UPDATE users SET username = $1 WHERE id = $2 RETURNING id, email, username, created_at';
 
-// Logic: Auto-cancel old orders by checking time in queries
 const createOrder = 'INSERT INTO orders (client_id, details, payment_amount, phone_number, latitude, longitude) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *';
 
 const getPendingOrders = `
@@ -34,7 +33,6 @@ const acceptOrder = `
 
 const cancelOrder = 'UPDATE orders SET status = \'cancelled\' WHERE id = $1 AND client_id = $2 AND status IN (\'pending\', \'accepted\') RETURNING *';
 
-// Two-sided Mark Done
 const markClientDone = 'UPDATE orders SET client_done = TRUE WHERE id = $1 AND client_id = $2 RETURNING *';
 const markLifterDone = 'UPDATE orders SET lifter_done = TRUE WHERE id = $1 AND lifter_id = $2 RETURNING *';
 const checkAndFinalizeOrder = 'UPDATE orders SET status = \'done\' WHERE id = $1 AND client_done = TRUE AND lifter_done = TRUE RETURNING *';
@@ -42,6 +40,10 @@ const checkAndFinalizeOrder = 'UPDATE orders SET status = \'done\' WHERE id = $1
 const setOTP = 'UPDATE users SET otp_code = $1, otp_expiry = $2 WHERE LOWER(email) = LOWER($3) RETURNING id';
 const verifyOTP = 'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND otp_code = $2 AND otp_expiry > NOW()';
 const resetPassword = 'UPDATE users SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2';
+
+const submitRating = 'INSERT INTO ratings (order_id, from_user_id, to_user_id, rating, comment) VALUES ($1, $2, $3, $4, $5) RETURNING *';
+const getUserRating = 'SELECT AVG(rating)::NUMERIC(10,1) as average_rating, COUNT(*) as total_ratings FROM ratings WHERE to_user_id = $1';
+const checkRatingExists = 'SELECT id FROM ratings WHERE order_id = $1 AND from_user_id = $2';
 
 module.exports = {
   createUser,
@@ -60,4 +62,7 @@ module.exports = {
   setOTP,
   verifyOTP,
   resetPassword,
+  submitRating,
+  getUserRating,
+  checkRatingExists,
 };

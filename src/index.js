@@ -47,14 +47,60 @@ app.get('/', (req, res) => {
 // Profile Route
 app.get('/profile', auth, async (req, res) => {
   try {
-    const { rows } = await db.query(queries.getUserById, [req.user.id]);
-    if (rows.length === 0) {
+    const userRes = await db.query(queries.getUserById, [req.user.id]);
+    if (userRes.rows.length === 0) {
       return res.status(404).json({ error: 'User not found.' });
     }
-    res.json(rows[0]);
+    const ratingRes = await db.query(queries.getUserRating, [req.user.id]);
+    res.json({ 
+      ...userRes.rows[0], 
+      rating: ratingRes.rows[0].average_rating || 0,
+      total_ratings: ratingRes.rows[0].total_ratings || 0
+    });
   } catch (error) {
     console.error('Fetch profile error:', error);
     res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// Submit Rating
+app.post('/orders/:id/rate', auth, async (req, res) => {
+  const { id } = req.params;
+  const { rating, comment } = req.body;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Valid rating (1-5) is required' });
+  }
+
+  try {
+    // 1. Get the order to find who to rate
+    const orderRes = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
+    if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
+    
+    const order = orderRes.rows[0];
+    if (order.status !== 'done') return res.status(400).json({ error: 'Can only rate completed orders' });
+
+    let to_user_id;
+    if (order.client_id === req.user.id) {
+      to_user_id = order.lifter_id;
+    } else if (order.lifter_id === req.user.id) {
+      to_user_id = order.client_id;
+    } else {
+      return res.status(403).json({ error: 'Not authorized to rate this order' });
+    }
+
+    if (!to_user_id) return res.status(400).json({ error: 'No user to rate' });
+
+    // 2. Check if already rated
+    const checkRes = await db.query(queries.checkRatingExists, [id, req.user.id]);
+    if (checkRes.rows.length > 0) return res.status(400).json({ error: 'Already rated' });
+
+    // 3. Submit
+    const result = await db.query(queries.submitRating, [id, req.user.id, to_user_id, rating, comment]);
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Rate error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
