@@ -1,7 +1,6 @@
 require('dotenv').config({ override: true });
 const { Pool } = require('pg');
 
-// Using connectionString is much more reliable for production/Vercel
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -10,6 +9,13 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle database client', err);
+});
+
 module.exports = {
-  query: (text, params) => pool.query(text, params),
+  query: (text, params) => {
+    console.log('Executing query:', text);
+    return pool.query(text, params);
+  },
 };

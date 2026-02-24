@@ -67,17 +67,22 @@ app.get('/profile', auth, async (req, res) => {
 app.post('/orders/:id/rate', auth, async (req, res) => {
   const { id } = req.params;
   const { rating, comment } = req.body;
+  console.log(`Rating attempt for order ${id} by user ${req.user.id}`);
 
   if (!rating || rating < 1 || rating > 5) {
     return res.status(400).json({ error: 'Valid rating (1-5) is required' });
   }
 
   try {
-    // 1. Get the order to find who to rate
+    // 1. Get the order
     const orderRes = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
+    console.log(`Order query returned ${orderRes.rows.length} rows`);
+    
     if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
     
     const order = orderRes.rows[0];
+    console.log(`Order status: ${order.status}, Client: ${order.client_id}, Lifter: ${order.lifter_id}`);
+
     if (order.status !== 'done') return res.status(400).json({ error: 'Can only rate completed orders' });
 
     let to_user_id;
@@ -86,21 +91,27 @@ app.post('/orders/:id/rate', auth, async (req, res) => {
     } else if (order.lifter_id === req.user.id) {
       to_user_id = order.client_id;
     } else {
+      console.log(`Unauthorized: req.user.id ${req.user.id} is not client or lifter`);
       return res.status(403).json({ error: 'Not authorized to rate this order' });
     }
 
-    if (!to_user_id) return res.status(400).json({ error: 'No user to rate' });
+    if (!to_user_id) {
+      console.log('Error: to_user_id is null');
+      return res.status(400).json({ error: 'No user to rate' });
+    }
 
     // 2. Check if already rated
     const checkRes = await db.query(queries.checkRatingExists, [id, req.user.id]);
     if (checkRes.rows.length > 0) return res.status(400).json({ error: 'Already rated' });
 
     // 3. Submit
+    console.log(`Inserting rating: from ${req.user.id} to ${to_user_id}, stars: ${rating}`);
     const result = await db.query(queries.submitRating, [id, req.user.id, to_user_id, rating, comment]);
+    console.log('Rating inserted successfully');
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    console.error('Rate error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('CRITICAL RATE ERROR:', error.message, error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
