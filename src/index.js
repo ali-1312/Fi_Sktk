@@ -256,8 +256,8 @@ app.post('/signup', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Sign up error:', error);
-    res.status(500).json({ error: 'Internal server error.' });
+    console.error('Sign up error details:', error.message, error.stack);
+    res.status(500).json({ error: 'Internal server error.', details: error.message });
   }
 });
 
