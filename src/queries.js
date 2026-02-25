@@ -41,10 +41,6 @@ const setOTP = 'UPDATE users SET otp_code = $1, otp_expiry = $2 WHERE LOWER(emai
 const verifyOTP = 'SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND otp_code = $2 AND otp_expiry > NOW()';
 const resetPassword = 'UPDATE users SET password_hash = $1, otp_code = NULL, otp_expiry = NULL WHERE id = $2';
 
-const submitRating = 'INSERT INTO ratings (order_id, from_user_id, to_user_id, rating, comment) VALUES ($1, $2, $3, $4, $5) RETURNING *';
-const getUserRating = 'SELECT AVG(rating)::NUMERIC(10,1) as average_rating, COUNT(*) as total_ratings FROM ratings WHERE to_user_id = $1';
-const checkRatingExists = 'SELECT id FROM ratings WHERE order_id = $1 AND from_user_id = $2';
-
 module.exports = {
   createUser,
   getUserByEmail,
@@ -62,7 +58,4 @@ module.exports = {
   setOTP,
   verifyOTP,
   resetPassword,
-  submitRating,
-  getUserRating,
-  checkRatingExists,
 };

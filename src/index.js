@@ -20,7 +20,11 @@ const transporter = nodemailer.createTransport({
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-auth-token']
+}));
 app.use(express.json());
 
 // Auth Middleware
@@ -46,7 +50,16 @@ app.get('/', (req, res) => {
 
 // Profile Route (Self)
 app.get('/profile', auth, async (req, res) => {
-  // ... existing logic ...
+  try {
+    const userRes = await db.query(queries.getUserById, [req.user.id]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    res.json(userRes.rows[0]);
+  } catch (error) {
+    console.error('Fetch profile error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
 });
 
 // Public Profile Route (Inspect others)
@@ -56,71 +69,15 @@ app.get('/profile/:id', auth, async (req, res) => {
     if (userRes.rows.length === 0) {
       return res.status(404).json({ error: 'User not found.' });
     }
-    const ratingRes = await db.query(queries.getUserRating, [req.params.id]);
-    
-    // Hide email for privacy when inspecting others
     const userData = userRes.rows[0];
     res.json({ 
+      id: userData.id,
       username: userData.username,
-      created_at: userData.created_at,
-      rating: ratingRes.rows[0].average_rating || 0,
-      total_ratings: ratingRes.rows[0].total_ratings || 0
+      created_at: userData.created_at
     });
   } catch (error) {
     console.error('Fetch public profile error:', error);
     res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// Submit Rating
-app.post('/orders/:id/rate', auth, async (req, res) => {
-  const { id } = req.params;
-  const { rating, comment } = req.body;
-  console.log(`Rating attempt for order ${id} by user ${req.user.id}`);
-
-  if (!rating || rating < 1 || rating > 5) {
-    return res.status(400).json({ error: 'Valid rating (1-5) is required' });
-  }
-
-  try {
-    // 1. Get the order
-    const orderRes = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
-    console.log(`Order query returned ${orderRes.rows.length} rows`);
-    
-    if (orderRes.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
-    
-    const order = orderRes.rows[0];
-    console.log(`Order status: ${order.status}, Client: ${order.client_id}, Lifter: ${order.lifter_id}`);
-
-    if (order.status !== 'done') return res.status(400).json({ error: 'Can only rate completed orders' });
-
-    let to_user_id;
-    if (order.client_id === req.user.id) {
-      to_user_id = order.lifter_id;
-    } else if (order.lifter_id === req.user.id) {
-      to_user_id = order.client_id;
-    } else {
-      console.log(`Unauthorized: req.user.id ${req.user.id} is not client or lifter`);
-      return res.status(403).json({ error: 'Not authorized to rate this order' });
-    }
-
-    if (!to_user_id) {
-      console.log('Error: to_user_id is null');
-      return res.status(400).json({ error: 'No user to rate' });
-    }
-
-    // 2. Check if already rated
-    const checkRes = await db.query(queries.checkRatingExists, [id, req.user.id]);
-    if (checkRes.rows.length > 0) return res.status(400).json({ error: 'Already rated' });
-
-    // 3. Submit
-    console.log(`Inserting rating: from ${req.user.id} to ${to_user_id}, stars: ${rating}`);
-    const result = await db.query(queries.submitRating, [id, req.user.id, to_user_id, rating, comment]);
-    console.log('Rating inserted successfully');
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('CRITICAL RATE ERROR:', error.message, error.stack);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -148,7 +105,6 @@ app.post('/orders', auth, async (req, res) => {
     return res.status(400).json({ error: 'All order fields are required.' });
   }
 
-  // Phone number validation (11 digits, starting with 01)
   const phoneRegex = /^01[0125][0-9]{8}$/;
   if (!phoneRegex.test(phone_number)) {
     return res.status(400).json({ error: 'Invalid phone number format.' });
@@ -181,32 +137,6 @@ app.get('/orders/pending', auth, async (req, res) => {
   }
 });
 
-// Get My Orders
-app.get('/orders/mine', auth, async (req, res) => {
-  try {
-    const { rows } = await db.query(queries.getMyOrders, [req.user.id]);
-    res.json(rows);
-  } catch (error) {
-    console.error('Fetch my orders error:', error);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-// Cancel Order
-app.put('/orders/:id/cancel', auth, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await db.query(queries.cancelOrder, [id, req.user.id]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Order not found or cannot be cancelled.' });
-    }
-    res.json({ message: 'Order cancelled successfully.', order: rows[0] });
-  } catch (error) {
-    console.error('Cancel order error:', error);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
 // Accept Order
 app.post('/orders/:id/accept', auth, async (req, res) => {
   const { id } = req.params;
@@ -226,10 +156,7 @@ app.post('/orders/:id/accept', auth, async (req, res) => {
 app.put('/orders/:id/done', auth, async (req, res) => {
   const { id } = req.params;
   try {
-    // 1. Try to mark as client
     let result = await db.query(queries.markClientDone, [id, req.user.id]);
-    
-    // 2. If not client, try to mark as lifter
     if (result.rows.length === 0) {
       result = await db.query(queries.markLifterDone, [id, req.user.id]);
     }
@@ -238,15 +165,28 @@ app.put('/orders/:id/done', auth, async (req, res) => {
       return res.status(404).json({ error: 'Order not found or you are not authorized.' });
     }
 
-    // 3. Try to finalize if both sides are done
     const finalCheck = await db.query(queries.checkAndFinalizeOrder, [id]);
-    
     res.json({ 
       message: 'Status updated.', 
       order: finalCheck.rows.length > 0 ? finalCheck.rows[0] : result.rows[0] 
     });
   } catch (error) {
     console.error('Mark as done error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+// Cancel Order
+app.put('/orders/:id/cancel', auth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await db.query(queries.cancelOrder, [id, req.user.id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found or cannot be cancelled.' });
+    }
+    res.json({ message: 'Order cancelled successfully.', order: rows[0] });
+  } catch (error) {
+    console.error('Cancel order error:', error);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -280,36 +220,30 @@ app.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'Email, password, and username are required.' });
   }
 
-  // Email Domain Validation (gmail or outlook only)
   const emailRegex = /^[a-zA-Z0-9._%+-]+@(gmail\.com|outlook\.com)$/;
   if (!emailRegex.test(email.toLowerCase())) {
     return res.status(400).json({ error: 'Only Gmail and Outlook emails are supported.' });
   }
 
-  // Password Strength Validation (at least 8 chars, 1 letter, 1 number)
   const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
   if (!passwordRegex.test(password)) {
     return res.status(400).json({ error: 'Password must be at least 8 characters and contain both letters and numbers.' });
   }
 
   try {
-    // Check if email already exists
     const emailCheck = await db.query(queries.getUserByEmail, [email]);
     if (emailCheck.rows.length > 0) {
       return res.status(409).json({ error: 'Email already taken' });
     }
 
-    // Check if username already exists
     const userCheck = await db.query(queries.getUserByUsername, [username]);
     if (userCheck.rows.length > 0) {
       return res.status(409).json({ error: 'Username already taken' });
     }
 
-    // Hash password
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
-    // Create new user
     const newUser = await db.query(queries.createUser, [email, passwordHash, username]);
 
     res.status(201).json({
@@ -322,8 +256,8 @@ app.post('/signup', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Sign up error details:', error.message, error.stack);
-    res.status(500).json({ error: 'Internal server error.', details: error.message });
+    console.error('Sign up error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
@@ -336,52 +270,36 @@ app.post('/login', async (req, res) => {
   }
 
   try {
-    // Check if user exists
     const { rows } = await db.query(queries.getUserByEmail, [email]);
-    
     if (rows.length === 0) {
       return res.status(404).json({ error: 'User Not Found' });
     }
 
     const user = rows[0];
-
-    // Check password
     const isMatch = await bcrypt.compare(password, user.password_hash);
-    
     if (!isMatch) {
       return res.status(401).json({ error: 'Password Invalid' });
     }
 
-    // Generate JWT
-    const payload = {
-      user: {
-        id: user.id,
-      },
-    };
-
-    jwt.sign(
-      payload,
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' },
-      (err, token) => {
-        if (err) throw err;
-        res.json({ token });
-      }
-    );
+    const payload = { user: { id: user.id } };
+    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' }, (err, token) => {
+      if (err) throw err;
+      res.json({ token });
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
 
-// Forgot Password - Send OTP
+// Forgot Password
 app.post('/forgot-password', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
 
   try {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+    const expiry = new Date(Date.now() + 10 * 60 * 1000); 
 
     const { rows } = await db.query(queries.setOTP, [otp, expiry, email]);
     if (rows.length === 0) return res.status(404).json({ error: 'User Not Found' });
@@ -409,7 +327,6 @@ app.post('/verify-otp', async (req, res) => {
     if (rows.length === 0) return res.status(400).json({ error: 'Invalid or expired OTP' });
     res.json({ message: 'OTP verified', userId: rows[0].id });
   } catch (error) {
-    console.error('Verify OTP error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -427,11 +344,9 @@ app.post('/reset-password', async (req, res) => {
     await db.query(queries.resetPassword, [hash, userId]);
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
-    console.error('Reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 if (process.env.NODE_ENV !== 'production') {
   app.listen(port, () => {
